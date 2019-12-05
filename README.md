@@ -233,7 +233,7 @@ Donation
 
 Your donation will encourage me to continue to improve Kafka Exporter. Support Alipay donation.
 
-![](https://github.com/danielqsj/kafka_exporter/raw/master/alipay.jpg)
+link to https://github.com/danielqsj/kafka_exporter
 
 License
 -------
