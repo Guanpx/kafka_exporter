@@ -12,10 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/Shopify/sarama"
-	kazoo "github.com/krallistic/kazoo-go"
+	"github.com/krallistic/kazoo-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	plog "github.com/prometheus/common/log"
@@ -33,7 +32,7 @@ var (
 	clusterBrokers                     *prometheus.Desc
 	topicPartitions                    *prometheus.Desc
 	topicCurrentOffset                 *prometheus.Desc
-	topicOldestOffset                  *prometheus.Desc
+	// topicOldestOffset                  *prometheus.Desc
 	topicPartitionLeader               *prometheus.Desc
 	topicPartitionReplicas             *prometheus.Desc
 	topicPartitionInSyncReplicas       *prometheus.Desc
@@ -42,22 +41,19 @@ var (
 	consumergroupCurrentOffset         *prometheus.Desc
 	consumergroupCurrentOffsetSum      *prometheus.Desc
 	consumergroupLag                   *prometheus.Desc
-	consumergroupLagSum                *prometheus.Desc
+	// consumergroupLagSum                *prometheus.Desc
 	consumergroupLagZookeeper          *prometheus.Desc
-	consumergroupMembers               *prometheus.Desc
 )
 
 // Exporter collects Kafka stats from the given server and exports them using
 // the prometheus metrics package.
 type Exporter struct {
-	client                  sarama.Client
-	topicFilter             *regexp.Regexp
-	groupFilter             *regexp.Regexp
-	mu                      sync.Mutex
-	useZooKeeperLag         bool
-	zookeeperClient         *kazoo.Kazoo
-	nextMetadataRefresh     time.Time
-	metadataRefreshInterval time.Duration
+	client          sarama.Client
+	topicFilter     *regexp.Regexp
+	groupFilter     *regexp.Regexp
+	mu              sync.Mutex
+	useZooKeeperLag bool
+	zookeeperClient *kazoo.Kazoo
 }
 
 type kafkaOpts struct {
@@ -75,7 +71,6 @@ type kafkaOpts struct {
 	useZooKeeperLag          bool
 	uriZookeeper             []string
 	labels                   string
-	metadataRefreshInterval  string
 }
 
 // CanReadCertAndKey returns true if the certificate and key files already exists,
@@ -170,14 +165,6 @@ func NewExporter(opts kafkaOpts, topicFilter string, groupFilter string) (*Expor
 		zookeeperClient, err = kazoo.NewKazoo(opts.uriZookeeper, nil)
 	}
 
-	interval, err := time.ParseDuration(opts.metadataRefreshInterval)
-	if err != nil {
-		plog.Errorln("Cannot parse metadata refresh interval")
-		panic(err)
-	}
-
-	config.Metadata.RefreshFrequency = interval
-
 	client, err := sarama.NewClient(opts.uri, config)
 
 	if err != nil {
@@ -188,13 +175,11 @@ func NewExporter(opts kafkaOpts, topicFilter string, groupFilter string) (*Expor
 
 	// Init our exporter.
 	return &Exporter{
-		client:                  client,
-		topicFilter:             regexp.MustCompile(topicFilter),
-		groupFilter:             regexp.MustCompile(groupFilter),
-		useZooKeeperLag:         opts.useZooKeeperLag,
-		zookeeperClient:         zookeeperClient,
-		nextMetadataRefresh:     time.Now(),
-		metadataRefreshInterval: interval,
+		client:          client,
+		topicFilter:     regexp.MustCompile(topicFilter),
+		groupFilter:     regexp.MustCompile(groupFilter),
+		useZooKeeperLag: opts.useZooKeeperLag,
+		zookeeperClient: zookeeperClient,
 	}, nil
 }
 
@@ -203,7 +188,7 @@ func NewExporter(opts kafkaOpts, topicFilter string, groupFilter string) (*Expor
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- clusterBrokers
 	ch <- topicCurrentOffset
-	ch <- topicOldestOffset
+	// ch <- topicOldestOffset
 	ch <- topicPartitions
 	ch <- topicPartitionLeader
 	ch <- topicPartitionReplicas
@@ -214,31 +199,22 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- consumergroupCurrentOffsetSum
 	ch <- consumergroupLag
 	ch <- consumergroupLagZookeeper
-	ch <- consumergroupLagSum
+	// ch <- consumergroupLagSum
 }
 
 // Collect fetches the stats from configured Kafka location and delivers them
 // as Prometheus metrics. It implements prometheus.Collector.
 func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	var wg = sync.WaitGroup{}
-	ch <- prometheus.MustNewConstMetric(
-		clusterBrokers, prometheus.GaugeValue, float64(len(e.client.Brokers())),
-	)
+	// ch <- prometheus.MustNewConstMetric(
+	// 	clusterBrokers, prometheus.GaugeValue, float64(len(e.client.Brokers())),
+	// )
 
 	offset := make(map[string]map[int32]int64)
 
-	now := time.Now()
-
-	if now.After(e.nextMetadataRefresh) {
-		plog.Info("Refreshing client metadata")
-
-		if err := e.client.RefreshMetadata(); err != nil {
-			plog.Errorf("Cannot refresh topics, using cached data: %v", err)
-		}
-
-		e.nextMetadataRefresh = now.Add(e.metadataRefreshInterval)
+	if err := e.client.RefreshMetadata(); err != nil {
+		plog.Errorf("Cannot refresh topics, using cached data: %v", err)
 	}
-
 	topics, err := e.client.Topics()
 	if err != nil {
 		plog.Errorf("Cannot get topics: %v", err)
@@ -281,14 +257,14 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 					)
 				}
 
-				oldestOffset, err := e.client.GetOffset(topic, partition, sarama.OffsetOldest)
-				if err != nil {
-					plog.Errorf("Cannot get oldest offset of topic %s partition %d: %v", topic, partition, err)
-				} else {
-					ch <- prometheus.MustNewConstMetric(
-						topicOldestOffset, prometheus.GaugeValue, float64(oldestOffset), topic, strconv.FormatInt(int64(partition), 10),
-					)
-				}
+				// oldestOffset, err := e.client.GetOffset(topic, partition, sarama.OffsetOldest)
+				// if err != nil {
+				// 	plog.Errorf("Cannot get oldest offset of topic %s partition %d: %v", topic, partition, err)
+				// } else {
+				// 	ch <- prometheus.MustNewConstMetric(
+				// 		topicOldestOffset, prometheus.GaugeValue, float64(oldestOffset), topic, strconv.FormatInt(int64(partition), 10),
+				// 	)
+				// }
 
 				replicas, err := e.client.Replicas(topic, partition)
 				if err != nil {
@@ -389,9 +365,6 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 					offsetFetchRequest.AddPartition(topic, partition)
 				}
 			}
-			ch <- prometheus.MustNewConstMetric(
-				consumergroupMembers, prometheus.GaugeValue, float64(len(group.Members)), group.GroupId,
-			)
 			if offsetFetchResponse, err := broker.FetchOffset(&offsetFetchRequest); err != nil {
 				plog.Errorf("Cannot get offset of group %s: %v", group.GroupId, err)
 			} else {
@@ -411,7 +384,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 						for partition, offsetFetchResponseBlock := range partitions {
 							err := offsetFetchResponseBlock.Err
 							if err != sarama.ErrNoError {
-								plog.Errorf("Error for  partition %d :%v", partition, err.Error())
+								plog.Errorln("Error for  partition %d :%v", partition, err.Error())
 								continue
 							}
 							currentOffset := offsetFetchResponseBlock.Offset
@@ -434,16 +407,16 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 									consumergroupLag, prometheus.GaugeValue, float64(lag), group.GroupId, topic, strconv.FormatInt(int64(partition), 10),
 								)
 							} else {
-								plog.Errorf("No offset of topic %s partition %d, cannot get consumer group lag", topic, partition)
+								plog.Errorln("No offset of topic %s partition %d, cannot get consumer group lag", topic, partition)
 							}
 							e.mu.Unlock()
 						}
 						ch <- prometheus.MustNewConstMetric(
 							consumergroupCurrentOffsetSum, prometheus.GaugeValue, float64(currentOffsetSum), group.GroupId, topic,
 						)
-						ch <- prometheus.MustNewConstMetric(
-							consumergroupLagSum, prometheus.GaugeValue, float64(lagSum), group.GroupId, topic,
-						)
+						// ch <- prometheus.MustNewConstMetric(
+						// 	consumergroupLagSum, prometheus.GaugeValue, float64(lagSum), group.GroupId, topic,
+						// )
 					}
 				}
 			}
@@ -467,35 +440,34 @@ func init() {
 }
 
 func main() {
+	app := kingpin.Version(version.Print("kafka_exporter")).DefaultEnvars()
 	var (
-		listenAddress = kingpin.Flag("web.listen-address", "Address to listen on for web interface and telemetry.").Default(":9308").String()
-		metricsPath   = kingpin.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").String()
-		topicFilter   = kingpin.Flag("topic.filter", "Regex that determines which topics to collect.").Default(".*").String()
-		groupFilter   = kingpin.Flag("group.filter", "Regex that determines which consumer groups to collect.").Default(".*").String()
-		logSarama     = kingpin.Flag("log.enable-sarama", "Turn on Sarama logging.").Default("false").Bool()
+		listenAddress = app.Flag("web.listen-address", "Address to listen on for web interface and telemetry.").Default(":9308").String()
+		metricsPath   = app.Flag("web.telemetry-path", "Path under which to expose metrics.").Default("/metrics").String()
+		topicFilter   = app.Flag("topic.filter", "Regex that determines which topics to collect.").Default(".*").String()
+		groupFilter   = app.Flag("group.filter", "Regex that determines which consumer groups to collect.").Default(".*").String()
+		logSarama     = app.Flag("log.enable-sarama", "Turn on Sarama logging.").Default("false").Bool()
 
 		opts = kafkaOpts{}
 	)
-	kingpin.Flag("kafka.server", "Address (host:port) of Kafka server.").Default("kafka:9092").StringsVar(&opts.uri)
-	kingpin.Flag("sasl.enabled", "Connect using SASL/PLAIN.").Default("false").BoolVar(&opts.useSASL)
-	kingpin.Flag("sasl.handshake", "Only set this to false if using a non-Kafka SASL proxy.").Default("true").BoolVar(&opts.useSASLHandshake)
-	kingpin.Flag("sasl.username", "SASL user name.").Default("").StringVar(&opts.saslUsername)
-	kingpin.Flag("sasl.password", "SASL user password.").Default("").StringVar(&opts.saslPassword)
-	kingpin.Flag("tls.enabled", "Connect using TLS.").Default("false").BoolVar(&opts.useTLS)
-	kingpin.Flag("tls.ca-file", "The optional certificate authority file for TLS client authentication.").Default("").StringVar(&opts.tlsCAFile)
-	kingpin.Flag("tls.cert-file", "The optional certificate file for client authentication.").Default("").StringVar(&opts.tlsCertFile)
-	kingpin.Flag("tls.key-file", "The optional key file for client authentication.").Default("").StringVar(&opts.tlsKeyFile)
-	kingpin.Flag("tls.insecure-skip-tls-verify", "If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure.").Default("false").BoolVar(&opts.tlsInsecureSkipTLSVerify)
-	kingpin.Flag("kafka.version", "Kafka broker version").Default(sarama.V1_0_0_0.String()).StringVar(&opts.kafkaVersion)
-	kingpin.Flag("use.consumelag.zookeeper", "if you need to use a group from zookeeper").Default("false").BoolVar(&opts.useZooKeeperLag)
-	kingpin.Flag("zookeeper.server", "Address (hosts) of zookeeper server.").Default("localhost:2181").StringsVar(&opts.uriZookeeper)
-	kingpin.Flag("kafka.labels", "Kafka cluster name").Default("").StringVar(&opts.labels)
-	kingpin.Flag("refresh.metadata", "Metadata refresh interval").Default("30s").StringVar(&opts.metadataRefreshInterval)
+	app.Flag("kafka.server", "Address (host:port) of Kafka server.").Default("kafka:9092").StringsVar(&opts.uri)
+	app.Flag("sasl.enabled", "Connect using SASL/PLAIN.").Default("false").BoolVar(&opts.useSASL)
+	app.Flag("sasl.handshake", "Only set this to false if using a non-Kafka SASL proxy.").Default("true").BoolVar(&opts.useSASLHandshake)
+	app.Flag("sasl.username", "SASL user name.").Default("").StringVar(&opts.saslUsername)
+	app.Flag("sasl.password", "SASL user password.").Default("").StringVar(&opts.saslPassword)
+	app.Flag("tls.enabled", "Connect using TLS.").Default("false").BoolVar(&opts.useTLS)
+	app.Flag("tls.ca-file", "The optional certificate authority file for TLS client authentication.").Default("").StringVar(&opts.tlsCAFile)
+	app.Flag("tls.cert-file", "The optional certificate file for client authentication.").Default("").StringVar(&opts.tlsCertFile)
+	app.Flag("tls.key-file", "The optional key file for client authentication.").Default("").StringVar(&opts.tlsKeyFile)
+	app.Flag("tls.insecure-skip-tls-verify", "If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure.").Default("false").BoolVar(&opts.tlsInsecureSkipTLSVerify)
+	app.Flag("kafka.version", "Kafka broker version").Default(sarama.V1_0_0_0.String()).StringVar(&opts.kafkaVersion)
+	app.Flag("use.consumelag.zookeeper", "if you need to use a group from zookeeper").Default("false").BoolVar(&opts.useZooKeeperLag)
+	app.Flag("zookeeper.server", "Address (hosts) of zookeeper server.").Default("localhost:2181").StringsVar(&opts.uriZookeeper)
+	app.Flag("kafka.labels", "Kafka cluster name").Default("").StringVar(&opts.labels)
 
-	plog.AddFlags(kingpin.CommandLine)
-	kingpin.Version(version.Print("kafka_exporter"))
-	kingpin.HelpFlag.Short('h')
-	kingpin.Parse()
+	plog.AddFlags(app)
+	app.GetFlag("help").Short('h')
+	kingpin.MustParse(app.Parse(os.Args[1:]))
 
 	plog.Infoln("Starting kafka_exporter", version.Info())
 	plog.Infoln("Build context", version.BuildContext())
@@ -517,21 +489,24 @@ func main() {
 		"Number of Brokers in the Kafka Cluster.",
 		nil, labels,
 	)
+
 	topicPartitions = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "topic", "partitions"),
 		"Number of partitions for this Topic",
 		[]string{"topic"}, labels,
 	)
+
 	topicCurrentOffset = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "topic", "partition_current_offset"),
 		"Current Offset of a Broker at Topic/Partition",
 		[]string{"topic", "partition"}, labels,
 	)
-	topicOldestOffset = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "topic", "partition_oldest_offset"),
-		"Oldest Offset of a Broker at Topic/Partition",
-		[]string{"topic", "partition"}, labels,
-	)
+
+	// topicOldestOffset = prometheus.NewDesc(
+	// 	prometheus.BuildFQName(namespace, "topic", "partition_oldest_offset"),
+	// 	"Oldest Offset of a Broker at Topic/Partition",
+	// 	[]string{"topic", "partition"}, labels,
+	// )
 
 	topicPartitionLeader = prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "topic", "partition_leader"),
@@ -587,17 +562,11 @@ func main() {
 		[]string{"consumergroup", "topic", "partition"}, nil,
 	)
 
-	consumergroupLagSum = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "consumergroup", "lag_sum"),
-		"Current Approximate Lag of a ConsumerGroup at Topic for all partitions",
-		[]string{"consumergroup", "topic"}, labels,
-	)
-
-	consumergroupMembers = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, "consumergroup", "members"),
-		"Amount of members in a consumer group",
-		[]string{"consumergroup"}, labels,
-	)
+	// consumergroupLagSum = prometheus.NewDesc(
+	// 	prometheus.BuildFQName(namespace, "consumergroup", "lag_sum"),
+	// 	"Current Approximate Lag of a ConsumerGroup at Topic for all partitions",
+	// 	[]string{"consumergroup", "topic"}, labels,
+	// )
 
 	if *logSarama {
 		sarama.Logger = log.New(os.Stdout, "[sarama] ", log.LstdFlags)
