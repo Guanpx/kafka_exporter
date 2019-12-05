@@ -1,5 +1,4 @@
 FROM  ubuntu:14.04
-MAINTAINER  Daniel Qian <qsj.daniel@gmail.com>
 
 COPY ./kafka_exporter /bin/kafka_exporter
 
